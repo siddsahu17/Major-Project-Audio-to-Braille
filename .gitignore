@@ -1,0 +1,32 @@
+# Environment variables
+.env
+*.env
+.env.local
+.env.production
+.env.development
+
+# PDFs - too large for GitHub
+backend/data/**/*.pdf
+
+# Allow JSON knowledge maps
+!backend/data/**/class*.json
+
+# Python
+__pycache__/
+pycache/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+.Python
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+dist/
+.DS_Store
+*.local

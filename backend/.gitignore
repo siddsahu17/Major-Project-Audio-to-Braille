@@ -1,0 +1,12 @@
+.env
+.venv
+data/
+Diag/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/

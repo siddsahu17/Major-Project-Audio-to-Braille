@@ -1,0 +1,13 @@
+Language,Video_Duration,Video_URL,Raw_Word_Count,OpenAI_Word_Count,OpenAI_Time_Sec,OpenAI_Words_Per_Sec,OpenAI_Compression_Ratio,Ollama_Word_Count,Ollama_Time_Sec,Ollama_Words_Per_Sec,Ollama_Compression_Ratio
+en,5 min,https://www.youtube.com/watch?v=-GsolnXOiBg,821,716,7.98,102.91,0.87,785,46.16,17.79,0.96
+en,10 min,https://www.youtube.com/watch?v=m19F4IHTVGc,1559,1358,11.30,137.97,0.87,1343,67.39,23.13,0.86
+en,15 min,https://www.youtube.com/watch?v=zOHbe5NRabM,2969,1069,11.25,263.99,0.36,208,20.92,141.90,0.07
+en,30 min,https://www.youtube.com/watch?v=x-XdOaZPhBw,4856,660,8.49,572.00,0.14,368,24.82,195.65,0.08
+hi,5 min,https://www.youtube.com/watch?v=rhI_He5TygY,618,418,4.20,147.11,0.68,434,21.45,28.81,0.70
+hi,10 min,https://www.youtube.com/watch?v=2BcOv0VYHkY,2022,654,6.85,295.18,0.32,475,25.49,79.32,0.23
+hi,15 min,https://www.youtube.com/watch?v=qsxmV-9ut6E,2074,1057,14.34,144.61,0.51,193,23.80,87.15,0.09
+hi,30 min,https://www.youtube.com/watch?v=osQpCMdUTpU,5274,585,6.79,776.40,0.11,356,27.22,193.72,0.07
+mr,5 min,https://www.youtube.com/watch?v=6wbK6hyA66A,27,30,1.72,15.71,1.11,25,6.05,4.46,0.93
+mr,10 min,https://www.youtube.com/watch?v=gNd2HL8_qCE,27,31,1.66,16.23,1.15,25,5.87,4.60,0.93
+mr,15 min,https://www.youtube.com/watch?v=toIGK1vPyqc,1149,8,1.60,718.48,0.01,230,21.23,54.13,0.20
+mr,30 min,https://www.youtube.com/watch?v=GtmY8lU3FsU,2822,302,4.68,602.91,0.11,322,1476.18,1.91,0.11
