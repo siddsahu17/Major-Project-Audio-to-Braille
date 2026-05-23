@@ -2,7 +2,7 @@
 PDF Service
 Extracts text page-by-page from uploaded PDFs.
 Primary: PyMuPDF (fitz). Fallback for blank pages: pdfplumber.
-Extracted pages are cached in-memory by session_id.
+Extracted pages are cached in-memory by session_id (LRU, max 20 sessions).
 """
 
 from __future__ import annotations
@@ -10,20 +10,49 @@ from __future__ import annotations
 import io
 import logging
 import uuid
+from collections import OrderedDict
 from typing import Optional
 
 logger = logging.getLogger("sparshvaani.pdf")
 
+_MAX_SESSIONS = 20
+
+
+class _LRUCache:
+    """Fixed-capacity LRU cache backed by OrderedDict."""
+
+    def __init__(self, capacity: int) -> None:
+        self._cap = capacity
+        self._data: OrderedDict = OrderedDict()
+
+    def __contains__(self, key: str) -> bool:
+        return key in self._data
+
+    def __getitem__(self, key: str):
+        self._data.move_to_end(key)
+        return self._data[key]
+
+    def __setitem__(self, key: str, value) -> None:
+        if key in self._data:
+            self._data.move_to_end(key)
+        self._data[key] = value
+        if len(self._data) > self._cap:
+            evicted = next(iter(self._data))
+            del self._data[evicted]
+            logger.debug(f"LRU evicted PDF session {evicted}")
+
+
 # session_id → {0: "page 1 text", 1: "page 2 text", ...}  (0-indexed)
-_pdf_cache: dict[str, dict[int, str]] = {}
+_pdf_cache: _LRUCache = _LRUCache(_MAX_SESSIONS)
 # session_id → raw PDF bytes (for vision tool)
-_pdf_bytes: dict[str, bytes] = {}
+_pdf_bytes: _LRUCache = _LRUCache(_MAX_SESSIONS)
 
 
 class PDFService:
 
-    async def upload_pdf(self, file_bytes: bytes, filename: str) -> dict:
-        session_id = uuid.uuid4().hex
+    async def upload_pdf(self, file_bytes: bytes, filename: str, session_id: Optional[str] = None) -> dict:
+        if not session_id:
+            session_id = uuid.uuid4().hex
         pages: dict[int, str] = {}
 
         try:

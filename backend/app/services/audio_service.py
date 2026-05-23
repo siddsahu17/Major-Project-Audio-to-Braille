@@ -1,4 +1,3 @@
-import whisper
 import os
 import uuid
 import logging
@@ -9,28 +8,17 @@ logger = logging.getLogger("assistant_backend.audio_service")
 
 class AudioService:
     def __init__(self):
-        # We load whisper once. Using default 'base' model unless configured otherwise.
-        try:
-            self.model = whisper.load_model(settings.WHISPER_MODEL)
-            logger.info(f"Loaded whisper model: {settings.WHISPER_MODEL}")
-        except Exception as e:
-            logger.warning(f"Failed to load whisper model via local dependency (might need FFmpeg): {e}")
-            self.model = None
+        self.model = None
+        logger.info("AudioService initialized with OpenAI Whisper API (no local Whisper model loaded)")
 
     async def transcribe(self, audio_path: str) -> str:
-        if self.model:
-            logger.info("Using local Whisper for STT")
-            result = self.model.transcribe(audio_path)
-            return result["text"].strip()
-        else:
-            # Fallback to OpenAI API if local whisper fails to load
-            logger.info("Using OpenAI Whisper API for STT fallback")
-            with open(audio_path, "rb") as audio_file:
-                transcript = await client.audio.transcriptions.create(
-                    model="whisper-1", 
-                    file=audio_file
-                )
-            return transcript.text
+        logger.info("Using OpenAI Whisper API for STT")
+        with open(audio_path, "rb") as audio_file:
+            transcript = await client.audio.transcriptions.create(
+                model="whisper-1", 
+                file=audio_file
+            )
+        return transcript.text.strip()
 
     async def synthesize(self, text: str) -> str:
         """

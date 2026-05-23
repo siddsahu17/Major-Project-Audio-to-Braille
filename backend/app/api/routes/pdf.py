@@ -15,7 +15,8 @@ from typing import List
 
 from pydantic import BaseModel
 
-from app.api.deps import get_pdf_service, get_video_agent
+import asyncio
+from app.api.deps import get_pdf_service, get_rag_service, get_video_agent
 
 logger = logging.getLogger("sparshvaani.routes.pdf")
 router = APIRouter()
@@ -59,9 +60,40 @@ async def upload_pdf(file: UploadFile = File(...)):
         content = await file.read()
         svc = get_pdf_service()
         result = await svc.upload_pdf(content, filename)
+
+        # Fire-and-forget RAG indexing (don't block the upload response)
+        try:
+            rag = get_rag_service()
+            pages = {i: svc.get_page_text(result["session_id"], i + 1)
+                     for i in range(result["total_pages"])}
+            asyncio.create_task(
+                rag.index_pdf_pages(result["session_id"], filename, pages)
+            )
+        except Exception as rag_err:
+            logger.warning(f"RAG indexing skipped: {rag_err}")
+
         return result
     except Exception as e:
         logger.error(f"PDF upload error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/serve/{session_id}")
+async def serve_pdf(session_id: str):
+    """Serves raw PDF bytes cached in-memory for the frontend document viewer."""
+    svc = get_pdf_service()
+    try:
+        raw_bytes = svc.get_raw_bytes(session_id)
+        from fastapi.responses import Response
+        return Response(
+            content=raw_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"inline; filename={session_id}.pdf"}
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Session expired. Please ask me to reload the chapter.")
+    except Exception as e:
+        logger.error(f"Error serving cached PDF: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -79,7 +111,6 @@ async def serve_textbook(class_number: int, file_name: str):
     except Exception as e:
         logger.error(f"Error serving textbook: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @router.post("/load-chapter")
 async def load_chapter(req: LoadChapterRequest):

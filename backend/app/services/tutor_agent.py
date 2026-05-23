@@ -169,6 +169,20 @@ _TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "semantic_search",
+            "description": "Semantically search the current PDF for pages most relevant to a question or topic. More accurate than keyword search for conceptual questions.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Natural-language question or topic to search for"}
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "find_and_load_chapter",
             "description": "Find and load an NCERT chapter or topic by search query and optional class number. Call this when the student asks to read, learn, or open a specific chapter or topic.",
             "parameters": {
@@ -191,9 +205,10 @@ _TOOLS = [
 
 
 class TutorAgent:
-    def __init__(self, openai_api_key: str, pdf_service=None) -> None:
+    def __init__(self, openai_api_key: str, pdf_service=None, rag_service=None) -> None:
         self.client = AsyncOpenAI(api_key=openai_api_key)
         self.pdf_service = pdf_service
+        self.rag_service = rag_service
 
     async def chat(
         self,
@@ -289,6 +304,9 @@ class TutorAgent:
             args = json.loads(args_json)
         except json.JSONDecodeError:
             args = {}
+
+        if name == "semantic_search":
+            return self._tool_semantic_search(args.get("query", ""), session_id)
 
         if name == "find_and_load_chapter":
             return await self._tool_find_and_load_chapter(
@@ -434,6 +452,19 @@ class TutorAgent:
         except Exception as e:
             logger.error(f"Failed to load PDF for {file_name} from path {pdf_path}: {e}")
             return f"Found chapter '{title}' from Class {matched_class}, but encountered an error loading the file."
+
+    def _tool_semantic_search(self, query: str, session_id: str) -> str:
+        if not self.rag_service or not query:
+            return "Semantic search is unavailable."
+        try:
+            hits = self.rag_service.search_pages(query, session_id, top_k=3)
+            if not hits:
+                return f"No semantically relevant pages found for: '{query}'."
+            parts = [f"Page {h['page_num']} (score {h['score']}): {h['snippet'][:200]}" for h in hits]
+            return "Relevant pages:\n" + "\n".join(parts)
+        except Exception as e:
+            logger.warning(f"semantic_search error: {e}")
+            return "Semantic search encountered an error."
 
     def clear_session(self, session_id: str) -> None:
         _tutor_sessions.pop(session_id, None)

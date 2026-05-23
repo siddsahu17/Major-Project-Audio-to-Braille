@@ -59,10 +59,8 @@ class TTSService:
             audio_bytes = await sarvam_tts(text, language)
             filename = f"tts_{uuid.uuid4().hex}.wav"
             output_path = self.audio_dir / filename
-            # Write WAV bytes in a thread pool to be async-safe
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, lambda: output_path.write_bytes(audio_bytes))
-            # Non-blocking cleanup of stale files
             asyncio.create_task(self._cleanup_old_files())
             return filename
 
@@ -70,7 +68,7 @@ class TTSService:
         filename = f"tts_{uuid.uuid4().hex}.mp3"
         output_path = self.audio_dir / filename
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         await loop.run_in_executor(
             None, self._generate_gtts, text, lang_code, str(output_path)
         )
@@ -110,7 +108,7 @@ class TTSService:
     async def stream_openai_tts(
         self, text: str, language: str = "en"
     ) -> AsyncGenerator[bytes, None]:
-        """Stream TTS audio bytes using OpenAI tts-1 or Sarvam for hi/mr. Low-latency chunked MP3."""
+        """Stream TTS audio bytes. Uses gTTS for English, Sarvam for hi/mr."""
         if language in ["hi", "mr"]:
             from app.services.sarvam_client import sarvam_tts
             audio_bytes = await sarvam_tts(text, language)
@@ -119,21 +117,22 @@ class TTSService:
                 yield audio_bytes[i:i + chunk_size]
             return
 
-        from openai import AsyncOpenAI
-        from app.config.settings import settings
+        # English: generate via gTTS into a BytesIO buffer, then stream chunks
+        import io as _io
+        from gtts import gTTS  # type: ignore
 
-        client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-        voice_map = {"en": "alloy", "hi": "nova", "mr": "nova"}
-        voice = voice_map.get(language, "alloy")
+        loop = asyncio.get_running_loop()
+        buf = _io.BytesIO()
 
-        async with client.audio.speech.with_streaming_response.create(
-            model="tts-1",
-            voice=voice,
-            input=text,
-            response_format="mp3",
-        ) as response:
-            async for chunk in response.iter_bytes(chunk_size=4096):
-                yield chunk
+        def _gtts_to_buf() -> bytes:
+            tts = gTTS(text=text, lang="en", slow=False)
+            tts.write_to_fp(buf)
+            return buf.getvalue()
+
+        audio_bytes = await loop.run_in_executor(None, _gtts_to_buf)
+        chunk_size = 4096
+        for i in range(0, len(audio_bytes), chunk_size):
+            yield audio_bytes[i:i + chunk_size]
 
     async def _cleanup_old_files(self, max_age_seconds: int = 600) -> None:
         """Delete audio files older than max_age_seconds (default 10 min)."""

@@ -23,7 +23,8 @@ from app.api.routes.braille import router as braille_router
 from app.api.routes.assistant import router as assistant_router
 from app.api.routes.pdf import router as pdf_router
 from app.api.routes.voice import router as voice_router
-from app.api.deps import get_transcription_service, get_tts_service
+from app.api.routes.onboarding import router as onboarding_router
+from app.api.deps import get_transcription_service, get_tts_service, get_rag_service, get_pdf_service
 
 
 @asynccontextmanager
@@ -43,9 +44,51 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Service pre-warm warning (non-fatal): {e}")
 
+    # Index all pre-loaded textbooks into Pinecone (non-blocking)
+    import asyncio as _asyncio
+    _asyncio.create_task(_index_all_textbooks())
+
     yield
 
     logger.info("Shutting down Sparsh Vaani API.")
+
+
+async def _index_all_textbooks() -> None:
+    """Walk the textbook directory and index all PDFs into Pinecone on startup."""
+    try:
+        from app.services.chapter_finder import list_all_textbooks  # type: ignore
+        textbooks = list_all_textbooks()
+    except Exception:
+        logger.debug("chapter_finder.list_all_textbooks not available — skipping bulk indexing.")
+        return
+
+    if not textbooks:
+        return
+
+    try:
+        rag = get_rag_service()
+        pdf_svc = get_pdf_service()
+    except Exception as e:
+        logger.warning(f"RAG startup indexing skipped: {e}")
+        return
+
+    for tb in textbooks:
+        try:
+            import aiofiles  # type: ignore
+            async with aiofiles.open(tb["pdf_path"], "rb") as f:
+                content = await f.read()
+            result = await pdf_svc.upload_pdf(content, tb["filename"])
+            pages = {i: pdf_svc.get_page_text(result["session_id"], i + 1)
+                     for i in range(result["total_pages"])}
+            await rag.index_pdf_pages(
+                result["session_id"],
+                tb["filename"],
+                pages,
+                class_number=tb.get("class_number"),
+            )
+            logger.info(f"Indexed textbook: {tb['filename']}")
+        except Exception as e:
+            logger.warning(f"Failed to index {tb.get('filename', '?')}: {e}")
 
 
 def create_app() -> FastAPI:
@@ -74,12 +117,8 @@ def create_app() -> FastAPI:
     # ── CORS ─────────────────────────────────────────────────────────────
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[
-            "http://localhost:5173",
-            "http://localhost:3000",
-            "https://your-app.vercel.app",
-            "*"
-        ],
+        allow_origins=settings.cors_origins_list(),
+        allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -108,6 +147,7 @@ def create_app() -> FastAPI:
     app.include_router(assistant_router, prefix="/assistant", tags=["Voice Assistant"])
     app.include_router(pdf_router, prefix="/pdf", tags=["PDF Tutor"])
     app.include_router(voice_router, prefix="/voice", tags=["Voice Tutor"])
+    app.include_router(onboarding_router, prefix="/api/onboarding", tags=["Onboarding"])
     # Legacy routes kept intact
     app.include_router(image.router, prefix="/image", tags=["Image Analysis"])
     app.include_router(chat.router, prefix="/chat", tags=["Chat (Legacy)"])

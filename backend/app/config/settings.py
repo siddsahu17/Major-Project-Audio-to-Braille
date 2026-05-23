@@ -21,8 +21,12 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = Field(default="app/data/uploads")
     TEMP_DIR: str = Field(default="app/data/temp")
 
-    # CORS — comma-separated list of allowed origins (use '*' only in dev)
-    CORS_ORIGINS: str = Field(default="http://localhost:5173,http://localhost:3000")
+    # CORS — comma-separated list of allowed origins
+    CORS_ORIGINS: str = Field(default="http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174,http://localhost:3000,https://sparshvaani.vercel.app")
+
+    # Pinecone (RAG vector database)
+    PINECONE_API_KEY: str = Field(default="")
+    PINECONE_INDEX_NAME: str = Field(default="sparshvaani-textbooks")
 
     model_config = SettingsConfigDict(
         env_file=".env",

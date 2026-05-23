@@ -11,7 +11,6 @@ from app.main import app  # Compatibility bridge for uvicorn main:app in Docker/
 # So 'from audio.youtube_...' should work if python sees 'audio' as a package/namespace.
 # I will create an empty __init__.py in audio if it doesn't exist, just in case.
 
-from audio import youtube_speech_recognition
 from audio import youtube_whisper
 # from audio import youtube_vosk
 # pytranscript removed
@@ -42,7 +41,7 @@ def main():
     
     try:
         if choice == "1":
-            youtube_speech_recognition.transcribe_with_speech_recognition(youtube_url)
+            print("SpeechRecognition engine is disabled/unavailable.")
         elif choice == "2":
             youtube_whisper.transcribe_with_whisper(youtube_url)
         # elif choice == "3":

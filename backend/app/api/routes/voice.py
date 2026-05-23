@@ -18,6 +18,8 @@ from app.api.deps import (
     get_transcription_service,
     get_tts_service,
     get_tutor_agent,
+    get_intent_agent,
+    get_auto_loader_service,
 )
 from app.utils.audio_utils import convert_to_wav
 from app.utils.file_utils import cleanup_file, save_upload_file
@@ -68,6 +70,97 @@ async def voice_tutor(
                 status_code=400,
                 detail="Could not transcribe speech. Please speak clearly and try again.",
             )
+
+        # 1.5 Intent Detection & Auto Loading Interceptor
+        intent_agent = get_intent_agent()
+        intent_res = await intent_agent.detect_intent(user_text, lang)
+        intent = intent_res["intent"]
+        
+        if intent == "load_chapter" and intent_res["topic"]:
+            from app.services.chapter_finder import find_chapter
+            topic = intent_res["topic"]
+            cls_num = intent_res["class_number"] or class_number
+            
+            match = find_chapter(topic, cls_num)
+            if not match and cls_num is not None:
+                match = find_chapter(topic, None)
+                
+            if match:
+                matched_class = match["class"]
+                filename = match["file_name"]
+                chapter_title = match["title"]
+                stable_session_id = f"class{matched_class}_{filename}"
+                
+                # Get total pages quickly
+                import fitz
+                try:
+                    doc = fitz.open(match["pdf_path"])
+                    total_p = len(doc)
+                    doc.close()
+                except Exception as doc_err:
+                    logger.error(f"Failed to read PDF page count from {match['pdf_path']}: {doc_err}")
+                    total_p = 1
+                
+                # 2. Run AutoLoader load_chapter_direct first (takes <50ms if already indexed)
+                auto_loader = get_auto_loader_service()
+                await auto_loader.load_chapter_direct(match, stable_session_id, total_p)
+
+                # Acknowledgment message
+                ack_messages = {
+                    "en": "Finding your chapter, please wait...",
+                    "hi": "आपका chapter ढूंढ रहा हूं, कृपया प्रतीक्षा करें...",
+                    "mr": "तुमचा chapter शोधत आहे, कृपया थांबा..."
+                }
+                ack_text = ack_messages.get(lang, ack_messages["en"])
+                
+                # Confirmation message
+                confirm_messages = {
+                    "en": f"I have opened the chapter {chapter_title} for Class {matched_class}. You can start asking questions now.",
+                    "hi": f"मैंने कक्षा {matched_class} का अध्याय {chapter_title} खोल दिया है। अब आप प्रश्न पूछ सकते हैं।",
+                    "mr": f"मी इयत्ता {matched_class} चा {chapter_title} धडा उघडला आहे. तुम्ही आता प्रश्न विचारू शकता."
+                }
+                confirm_text = confirm_messages.get(lang, confirm_messages["en"])
+                
+                # Combine both to synthesize a single correct WAV/MP3 file with a valid header
+                combined_text = f"{ack_text} {confirm_text}"
+                tts_stream = tts_svc.stream_openai_tts(combined_text, lang)
+                
+                expose = "X-Transcription,X-Response,X-Should-Scroll,X-Language,X-Scroll-To-Page,X-Load-PDF,X-PDF-Session-Id,X-PDF-Filename,X-PDF-Class,X-PDF-Total-Pages"
+                headers = {
+                    "X-Transcription": quote(user_text, safe=" "),
+                    "X-Response": quote(f"{ack_text} {confirm_text}", safe=" "),
+                    "X-Should-Scroll": "false",
+                    "X-Language": lang,
+                    "X-Scroll-To-Page": "",
+                    "X-Load-PDF": "true",
+                    "X-PDF-Session-Id": stable_session_id,
+                    "X-PDF-Filename": filename,
+                    "X-PDF-Class": str(matched_class),
+                    "X-PDF-Total-Pages": str(total_p),
+                    "Access-Control-Expose-Headers": expose,
+                }
+                return StreamingResponse(
+                    content=tts_stream,
+                    media_type="audio/mpeg",
+                    headers=headers,
+                )
+            else:
+                # If AutoLoaderService cannot find a matching chapter, explicitly explain
+                fallback_msg = {
+                    "en": f"I couldn't find any NCERT science chapter about '{topic}'. Could you please tell me your class and the topic name again?",
+                    "hi": f"मुझे '{topic}' से संबंधित कोई विज्ञान अध्याय नहीं मिला। क्या आप अपनी कक्षा और अध्याय का नाम फिर से बता सकते हैं?",
+                    "mr": f"मला '{topic}' संबंधित कोणताही विज्ञान धडा सापडला नाही. कृपया तुमचा वर्ग आणि धड्याचे नाव पुन्हा सांगू शकता का?"
+                }
+                response_text = fallback_msg.get(lang, fallback_msg["en"])
+                tts_stream = tts_svc.stream_openai_tts(response_text, lang)
+                headers = {
+                    "X-Transcription": quote(user_text, safe=" "),
+                    "X-Response": quote(response_text, safe=" "),
+                    "X-Should-Scroll": "false",
+                    "X-Language": lang,
+                    "Access-Control-Expose-Headers": "X-Transcription,X-Response,X-Language",
+                }
+                return StreamingResponse(content=tts_stream, media_type="audio/mpeg", headers=headers)
 
         # 2. TutorAgent agentic loop
         result = await agent.chat(

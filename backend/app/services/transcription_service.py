@@ -19,8 +19,6 @@ from pathlib import Path
 from typing import Optional
 from app.services.sarvam_client import sarvam_transcribe
 
-import numpy as np
-
 logger = logging.getLogger("sparshvaani.transcription")
 
 # Language code mapping: our API codes → Whisper language codes
@@ -76,7 +74,7 @@ class TranscriptionService:
             }
 
         lang_code = LANG_MAP.get(language)
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             None, self._transcribe_local, file_path, lang_code
         )
@@ -88,7 +86,7 @@ class TranscriptionService:
         No permanent files are written to disk.
         """
         lang_code = LANG_MAP.get(language)
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             None, self._transcribe_youtube_sync, url, lang_code
         )

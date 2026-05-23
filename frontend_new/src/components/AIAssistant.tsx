@@ -80,6 +80,68 @@ export function AIAssistant({
     }
   }, []);
 
+  const playOnboarding = useCallback(async (forcedLanguage?: string) => {
+    try {
+      const activeLanguage = forcedLanguage || language || "en";
+      const fetchLang = activeLanguage === "auto" ? "en" : activeLanguage;
+      setStatus("thinking");
+      const response = await fetch(
+        `${BASE_URL}/api/onboarding/onboarding-audio?language=${fetchLang}`
+      );
+      if (!response.ok) {
+        setStatus("idle");
+        return;
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      stopAudio();
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      setStatus("speaking");
+      audio.onended = () => {
+        URL.revokeObjectURL(url);
+        if (audioRef.current === audio) {
+          audioRef.current = null;
+          setStatus("idle");
+        }
+        sessionStorage.setItem("onboarding_played", "true");
+      };
+      audio.onerror = () => {
+        URL.revokeObjectURL(url);
+        if (audioRef.current === audio) {
+          audioRef.current = null;
+          setStatus("idle");
+        }
+      };
+      audio.play().catch(() => setStatus("idle"));
+    } catch (error) {
+      console.error("Onboarding audio failed:", error);
+      setStatus("idle");
+    }
+  }, [language, stopAudio, setStatus]);
+
+  // Autoplay onboarding on first user interaction with tab
+  useEffect(() => {
+    const hasPlayed = sessionStorage.getItem("onboarding_played");
+    if (hasPlayed) return;
+
+    const playOnFirstInteraction = () => {
+      playOnboarding();
+      document.removeEventListener("click", playOnFirstInteraction);
+      document.removeEventListener("keydown", playOnFirstInteraction);
+    };
+
+    document.addEventListener("click", playOnFirstInteraction);
+    document.addEventListener("keydown", playOnFirstInteraction);
+
+    return () => {
+      document.removeEventListener("click", playOnFirstInteraction);
+      document.removeEventListener("keydown", playOnFirstInteraction);
+    };
+  }, [playOnboarding]);
+
+
+
   const sendAudio = useCallback(
     async (blob: Blob) => {
       const activeSessionId = sessionId || fallbackSessionIdRef.current;
@@ -112,13 +174,20 @@ export function AIAssistant({
 
         // Handle dynamically voice-loaded PDF textbook
         if (result.loadPdf && result.pdfSessionId && result.pdfFilename && result.pdfClass) {
-          const pdfUrl = `${BASE_URL}/pdf/${result.pdfClass}/${result.pdfFilename}`;
+          const pdfUrl = `${BASE_URL}/pdf/serve/${result.pdfSessionId}`;
           loadChapter(
             result.pdfSessionId,
             result.pdfFilename,
             pdfUrl,
             result.pdfTotalPages || 1,
           );
+
+          useSessionStore.getState().setAutoLoadedChapter({
+            filename: result.pdfFilename,
+            class_number: result.pdfClass,
+            chapter_title: result.pdfFilename,
+            session_id: result.pdfSessionId,
+          });
         }
 
         // Keep local studentClass updated in store
@@ -132,6 +201,26 @@ export function AIAssistant({
           } else {
             onScrollDown();
           }
+        }
+
+        if (result.language && result.language !== language) {
+          setLanguage(result.language);
+        }
+
+        const transcriptLower = (result.transcription || "").toLowerCase().trim();
+        const isLangChange = 
+          transcriptLower.includes("change language") ||
+          transcriptLower.includes("language change") ||
+          transcriptLower.includes("भाषा बदला") ||
+          transcriptLower.includes("भाषा बदलो") ||
+          transcriptLower.includes("मराठीत बोला") ||
+          transcriptLower.includes("मराठी") ||
+          transcriptLower.includes("हिंदी") ||
+          transcriptLower.includes("english");
+
+        if (isLangChange) {
+          playOnboarding(result.language);
+          return;
         }
 
         setStatus("speaking");
@@ -168,6 +257,7 @@ export function AIAssistant({
       onScrollDown,
       onScrollToPage,
       setStatus,
+      playOnboarding,
     ],
   );
 
@@ -226,8 +316,11 @@ export function AIAssistant({
       startRecording();
     } else if (status === "listening") {
       stopRecording();
+    } else if (status === "speaking") {
+      stopAudio();
+      setStatus("idle");
     }
-  }, [status, startRecording, stopRecording]);
+  }, [status, startRecording, stopRecording, stopAudio, setStatus]);
 
   // Global spacebar recording toggle
   useEffect(() => {
@@ -340,7 +433,7 @@ export function AIAssistant({
       </div>
 
       {/* Settings — language only, fixed at bottom */}
-      <div className="px-5 py-3 border-t border-border shrink-0">
+      <div className="px-5 py-3 border-t border-border shrink-0 flex flex-col gap-2">
         <div className="flex items-center justify-between gap-3">
           <label htmlFor="lang" className="text-[11px] text-foreground/80 whitespace-nowrap">
             Language
@@ -349,14 +442,25 @@ export function AIAssistant({
             id="lang"
             value={language}
             onChange={(e) => setLanguage(e.target.value)}
-            className="bg-white/5 border border-border rounded-lg text-[11px] py-1.5 px-2 text-foreground focus:outline-none focus:border-neon-cyan/50"
+            style={{ colorScheme: "dark" }}
+            className="bg-zinc-900 border border-border rounded-lg text-[11px] py-1.5 px-2 text-white focus:outline-none focus:border-neon-cyan/50"
           >
-            <option value="auto">Auto Detect</option>
-            <option value="en">English</option>
-            <option value="hi">हिन्दी</option>
-            <option value="mr">मराठी</option>
+            <option value="auto" className="bg-zinc-900 text-white">Auto Detect</option>
+            <option value="en" className="bg-zinc-900 text-white">English</option>
+            <option value="hi" className="bg-zinc-900 text-white">हिन्दी</option>
+            <option value="mr" className="bg-zinc-900 text-white">मराठी</option>
           </select>
         </div>
+        <button
+          onClick={() => {
+            sessionStorage.removeItem("onboarding_played");
+            playOnboarding();
+          }}
+          className="w-full py-2 rounded-lg border border-border text-[10px] font-mono uppercase tracking-wider bg-white/5 hover:bg-white/10 hover:border-neon-cyan/40 transition-colors text-muted-foreground hover:text-white cursor-pointer"
+          aria-label="Replay navigation instructions"
+        >
+          Replay Instructions
+        </button>
       </div>
 
       {/* PTT mic button */}
@@ -364,19 +468,25 @@ export function AIAssistant({
         <button
           ref={micBtnRef}
           onClick={toggleRecording}
-          disabled={status === "thinking" || status === "speaking"}
+          disabled={status === "thinking"}
           aria-pressed={status === "listening"}
-          aria-label={status === "listening" ? "Click to stop" : "Click to speak"}
-          className="w-full py-4 rounded-2xl hologram-bg flex items-center justify-center gap-3 hover:scale-[1.02] active:scale-[0.98] transition-transform glow-cyan disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100 cursor-pointer"
+          aria-label={
+            status === "listening" ? "Click to stop recording"
+            : status === "speaking" ? "Click to stop audio"
+            : "Click to speak"
+          }
+          className={`w-full py-4 rounded-2xl hologram-bg flex items-center justify-center gap-3 hover:scale-[1.02] active:scale-[0.98] transition-transform glow-cyan disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100 cursor-pointer ${
+            status === "speaking" ? "border border-neon-purple/40" : ""
+          }`}
         >
-          <span className={`size-2.5 rounded-full bg-background ${status === "listening" ? "animate-pulse" : ""}`} />
+          <span className={`size-2.5 rounded-full bg-background ${status === "listening" || status === "speaking" ? "animate-pulse" : ""}`} />
           <span className="font-display font-bold text-sm tracking-[0.2em] uppercase text-primary-foreground">
             {status === "listening"
-              ? "Click to stop"
+              ? "Stop recording"
               : status === "thinking"
                 ? "Processing..."
                 : status === "speaking"
-                  ? "Speaking..."
+                  ? "Stop audio"
                   : "Click to speak"}
           </span>
         </button>
