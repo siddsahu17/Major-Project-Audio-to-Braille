@@ -120,25 +120,33 @@ export function AIAssistant({
     }
   }, [language, stopAudio, setStatus]);
 
-  // Autoplay onboarding on first user interaction with tab
+  // Autoplay onboarding exactly once per browser session on mount.
+  // Empty dependency array guarantees this never re-runs.
+  // No document-level click fallback — that would intercept the speak button.
   useEffect(() => {
     const hasPlayed = sessionStorage.getItem("onboarding_played");
     if (hasPlayed) return;
 
-    const playOnFirstInteraction = () => {
-      playOnboarding();
-      document.removeEventListener("click", playOnFirstInteraction);
-      document.removeEventListener("keydown", playOnFirstInteraction);
-    };
+    // Mark immediately so rapid re-mounts or strict-mode double-invocations don't double-play
+    sessionStorage.setItem("onboarding_played", "true");
 
-    document.addEventListener("click", playOnFirstInteraction);
-    document.addEventListener("keydown", playOnFirstInteraction);
-
-    return () => {
-      document.removeEventListener("click", playOnFirstInteraction);
-      document.removeEventListener("keydown", playOnFirstInteraction);
-    };
-  }, [playOnboarding]);
+    (async () => {
+      try {
+        const response = await fetch(
+          `${BASE_URL}/api/onboarding/onboarding-audio?language=en`
+        );
+        if (!response.ok) return;
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        audio.onended = () => URL.revokeObjectURL(url);
+        audio.onerror = () => URL.revokeObjectURL(url);
+        await audio.play();
+      } catch {
+        // Autoplay blocked or endpoint unavailable — silently skip
+      }
+    })();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
 
 
